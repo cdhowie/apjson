@@ -3,7 +3,9 @@ use std::io::Write;
 use pyo3::{
     exceptions::PyValueError,
     prelude::*,
-    types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple},
+    types::{
+        PyBool, PyBytes, PyDict, PyFloat, PyFunction, PyInt, PyList, PyString, PyTuple, PyType,
+    },
 };
 
 /// Create a JSON fragment from a bytes value, which must contain an
@@ -36,33 +38,84 @@ impl Fragment {
     }
 }
 
+/// Serialization state.
+struct State<'py> {
+    buffer: Vec<u8>,
+    object_hook: Option<&'py Bound<'py, PyFunction>>,
+}
+
 /// Serialize the given value to the buffer.
-fn any_to_json<'py>(buf: &mut Vec<u8>, value: &Bound<'py, PyAny>) -> PyResult<()> {
+fn any_to_json<'py>(state: &mut State<'py>, value: &Bound<'py, PyAny>) -> PyResult<()> {
+    match (any_to_json_native(state, value), state.object_hook) {
+        (Err(AnyToJsonNativeError::UnsupportedType(_)), Some(hook)) => {
+            // If we have an object hook, we can try calling that and then
+            // serializing the result.
+            any_to_json_native(state, &hook.call1((value,))?)
+        }
+
+        (r, _) => r,
+    }?;
+
+    Ok(())
+}
+
+/// Errors that can occur in [`any_to_json_native`].
+enum AnyToJsonNativeError<'py> {
+    /// The type of the provided value is not supported.
+    UnsupportedType(Bound<'py, PyType>),
+
+    /// An error occurred during serialization of a supported value.
+    Serialization(PyErr),
+}
+
+impl From<PyErr> for AnyToJsonNativeError<'_> {
+    fn from(value: PyErr) -> Self {
+        AnyToJsonNativeError::Serialization(value)
+    }
+}
+
+impl From<AnyToJsonNativeError<'_>> for PyErr {
+    fn from(value: AnyToJsonNativeError<'_>) -> Self {
+        match value {
+            AnyToJsonNativeError::UnsupportedType(ty) => {
+                PyErr::new::<PyValueError, _>(format!("cannot serialize type as JSON: {ty}",))
+            }
+
+            AnyToJsonNativeError::Serialization(e) => e,
+        }
+    }
+}
+
+/// Serialize the given value to the buffer.
+///
+/// The type of the value must be one of the types natively supported by this
+/// library: None, bool, str, int, float, list, tuple, dict, or Fragment.
+fn any_to_json_native<'py>(
+    state: &mut State<'py>,
+    value: &Bound<'py, PyAny>,
+) -> Result<(), AnyToJsonNativeError<'py>> {
     if value.is_none() {
-        buf.extend(b"null");
+        state.buffer.extend(b"null");
     } else if value.is(PyBool::new(value.py(), true)) {
-        buf.extend(b"true");
+        state.buffer.extend(b"true");
     } else if value.is(PyBool::new(value.py(), false)) {
-        buf.extend(b"false");
+        state.buffer.extend(b"false");
     } else if let Ok(s) = value.cast::<PyString>() {
-        string_to_json(buf, s.to_str()?);
+        string_to_json(&mut state.buffer, s.to_str()?);
     } else if let Ok(i) = value.cast::<PyInt>() {
-        write!(buf, "{i}").unwrap();
+        write!(state.buffer, "{i}").unwrap();
     } else if let Ok(f) = value.cast::<PyFloat>() {
-        write!(buf, "{}", f.value()).unwrap();
+        write!(state.buffer, "{}", f.value()).unwrap();
     } else if let Ok(l) = value.cast::<PyList>() {
-        list_to_json(buf, l.iter())?;
+        list_to_json(state, l.iter())?;
     } else if let Ok(t) = value.cast::<PyTuple>() {
-        list_to_json(buf, t.iter())?;
+        list_to_json(state, t.iter())?;
     } else if let Ok(d) = value.cast::<PyDict>() {
-        dict_to_json(buf, d)?;
+        dict_to_json(state, d)?;
     } else if let Ok(f) = value.cast::<Fragment>() {
-        buf.extend(f.borrow().0.as_bytes(value.py()));
+        state.buffer.extend(f.borrow().0.as_bytes(value.py()));
     } else {
-        return Err(PyErr::new::<PyValueError, _>(format!(
-            "cannot serialize type as JSON: {}",
-            value.get_type()
-        )));
+        return Err(AnyToJsonNativeError::UnsupportedType(value.get_type()));
     }
 
     Ok(())
@@ -98,72 +151,78 @@ fn string_to_json(buf: &mut Vec<u8>, s: &str) {
 
 /// Serialize the given list to the buffer.
 fn list_to_json<'py>(
-    buf: &mut Vec<u8>,
+    state: &mut State<'py>,
     list: impl IntoIterator<Item = Bound<'py, PyAny>>,
 ) -> PyResult<()> {
-    buf.push(b'[');
+    state.buffer.push(b'[');
 
     let mut items = list.into_iter();
 
     if let Some(i) = items.next() {
-        any_to_json(buf, &i)?;
+        any_to_json(state, &i)?;
         drop(i);
 
         for i in items {
-            buf.push(b',');
-            any_to_json(buf, &i)?;
+            state.buffer.push(b',');
+            any_to_json(state, &i)?;
         }
     }
 
-    buf.push(b']');
+    state.buffer.push(b']');
 
     Ok(())
 }
 
 /// Serialize the given pair as a JSON object key and value.
-fn dict_item_to_json(
-    buf: &mut Vec<u8>,
-    key: &Bound<'_, PyAny>,
-    item: &Bound<'_, PyAny>,
+fn dict_item_to_json<'py>(
+    state: &mut State<'py>,
+    key: &Bound<'py, PyAny>,
+    item: &Bound<'py, PyAny>,
 ) -> PyResult<()> {
     let key = key.str()?;
-    string_to_json(buf, key.to_str()?);
+    string_to_json(&mut state.buffer, key.to_str()?);
 
-    buf.push(b':');
+    state.buffer.push(b':');
 
-    any_to_json(buf, item)?;
+    any_to_json(state, item)?;
 
     Ok(())
 }
 
 /// Serialize the given dict to the buffer.
-fn dict_to_json(buf: &mut Vec<u8>, dict: &Bound<'_, PyDict>) -> PyResult<()> {
-    buf.push(b'{');
+fn dict_to_json<'py>(state: &mut State<'py>, dict: &Bound<'py, PyDict>) -> PyResult<()> {
+    state.buffer.push(b'{');
 
     let mut items = dict.iter();
 
     if let Some((key, value)) = items.next() {
-        dict_item_to_json(buf, &key, &value)?;
+        dict_item_to_json(state, &key, &value)?;
 
         drop((key, value));
 
         for (key, value) in items {
-            buf.push(b',');
+            state.buffer.push(b',');
 
-            dict_item_to_json(buf, &key, &value)?;
+            dict_item_to_json(state, &key, &value)?;
         }
     }
 
-    buf.push(b'}');
+    state.buffer.push(b'}');
 
     Ok(())
 }
 
 /// Serialize the given value as JSON.
-pub fn into_json<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyBytes>> {
-    let mut buf = vec![];
+pub fn into_json<'py>(
+    value: &Bound<'py, PyAny>,
+    object_hook: Option<&'py Bound<'py, PyFunction>>,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let mut state = State {
+        buffer: vec![],
+        object_hook,
+    };
 
-    any_to_json(&mut buf, value)?;
+    any_to_json(&mut state, value)?;
 
-    Ok(PyBytes::new(value.py(), &buf))
+    Ok(PyBytes::new(value.py(), &state.buffer))
 }
