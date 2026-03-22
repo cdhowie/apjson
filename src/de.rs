@@ -192,8 +192,8 @@ trait Deserialization {
 
 /// Wrapper type for any Python value.
 ///
-/// This primary exists to support implementing `From<Bound<'py, T>>` to satisfy
-/// the `Into` bounds on the associated types of [`Deserialization`].
+/// This primarily exists to support implementing `From<Bound<'py, T>>` to
+/// satisfy the `Into` bounds on the associated types of [`Deserialization`].
 #[repr(transparent)]
 struct BoundAny<'py>(Bound<'py, PyAny>);
 
