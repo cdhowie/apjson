@@ -11,6 +11,7 @@ mod apjson {
         types::{PyBytes, PyFunction, PyString},
     };
 
+    /// Deserialize a JSON-encoded value.
     #[pyfunction]
     #[pyo3(signature = (json, /, object_hook = None))]
     fn loads<'py>(

@@ -6,41 +6,82 @@ use pyo3::{
     types::{PyBool, PyDict, PyFloat, PyFunction, PyInt, PyList, PyNone, PyString},
 };
 
+/// Specialized result for functions that can return thunks.
 #[must_use]
-enum TrampolineResult<'json, D: Deserialization> {
+enum ThunkResult<'json, D: Deserialization> {
+    /// Success.
     Ok(D::Any),
+    /// Failure.
     Err(ParseError<D::Error>),
 
-    Incomplete(Trampoline<'json, D::List, D::Map>),
+    /// Incomplete with a thunk holding the result of the operation so far.
+    Thunk(Thunk<'json, D>),
 }
 
-enum Trampoline<'json, TList, TDict> {
-    ParsingList(TList),
+/// A parsing thunk.
+///
+/// This enum holds the state of an in-progress list or map parse.  These thunks
+/// can be held in a heap-allocated stack to avoid a stack overflow when parsing
+/// very deep structures.
+///
+/// It is implied that the next operation to be performed is "parse any value
+/// from the input."  Once a single value is parsed, the last-encountered thunk
+/// is resumed.
+enum Thunk<'json, D: Deserialization> {
+    /// Incomplete parsing of a list.
+    ParsingList(D::List),
 
-    ParsingMap { dict: TDict, key: Cow<'json, str> },
+    /// Incomplete parsing of a map.
+    ParsingMap {
+        /// Map being parsed.
+        dict: D::Map,
+        /// The next key to be added.
+        key: Cow<'json, str>,
+    },
 }
 
+/// Unwraps a standard [`Result`] like the `?` operator, but the `Err` variant
+/// is repackaged into a [`ThunkResult::Err`].
+///
+/// This allows for more ergonomic usage of `Result`-returning functions from
+/// within a function that returns `ThunkResult`.
 macro_rules! trampoline_try {
     ( $e:expr ) => {
         match $e {
             ::std::result::Result::Ok(v) => v,
-            ::std::result::Result::Err(e) => return TrampolineResult::Err(e.into()),
+            ::std::result::Result::Err(e) => return ThunkResult::Err(e.into()),
         }
     };
 }
 
+/// A JSON parse error.
 pub enum ParseError<E> {
+    /// Encountered EOF inside of a value.
     Eof,
+    /// There were trailing non-whitespace characters.
     ExpectedEof,
+    /// A specific token was expected.
     Expected(&'static str),
+    /// Some component of a list item was expected.
     ExpectedListItem,
+    /// Some component of a map item was expected.
     ExpectedMapItem,
+    /// An ASCII digit was expected.
     ExpectedDigit,
+    /// The character encountered is an invalid start for any JSON value.
     ExpectedAny,
+    /// An invalid UTF-8 sequence was encountered while parsing a string.
     InvalidUtf8,
+    /// An invalid string escape sequence was encountered.
     InvalidStringEscape,
+    /// A number could not be parsed.
     InvalidNumber,
+    /// A string contained an unescaped control character.
     UnescapedControlCharacter,
+    /// Something else happened.
+    ///
+    /// In most cases this will be a `PyErr` that resulted from interacting with
+    /// the Python API, or was returned from a user-supplied function.
     Custom(E),
 }
 
@@ -74,6 +115,8 @@ impl From<ParseError<PyErr>> for PyErr {
 }
 
 impl ParseError<PyErr> {
+    /// Convert this parsing error into a `PyErr` with a note that specifies the
+    /// given location as the source of the error.
     fn into_pyerr_with_location<'py>(self, python: Python<'py>, location: usize) -> PyErr {
         let e: PyErr = self.into();
 
@@ -92,27 +135,44 @@ impl ParseError<PyErr> {
 /// even to support validation without deserialization by e.g. deserializing
 /// everything to ().
 trait Deserialization {
+    /// A type that can hold any possible deserialized value.
     type Any;
 
+    /// The null type.
     type Null: Into<Self::Any>;
+    /// The boolean type.
     type Bool: Into<Self::Any>;
+    /// The string type.
     type String: Into<Self::Any>;
+    /// The number type.
     type Number: Into<Self::Any>;
+    /// The map type.
     type Map: Into<Self::Any>;
+    /// The list type.
     type List: Into<Self::Any>;
 
+    /// The type for custom errors, if any.
     type Error;
 
+    /// Create a null value.
     fn create_null(&self) -> Self::Null;
 
+    /// Create the given boolean value.
     fn create_bool(&self, value: bool) -> Self::Bool;
 
+    /// Create the given string value.
     fn create_string(&self, value: &str) -> Self::String;
 
+    /// Create the given number value.
+    ///
+    /// `is_float` will be true if `value` contains at least one of: `'.'`,
+    /// `'e'`, or `'E'`.
     fn create_number(&self, value: &str, is_float: bool) -> Result<Self::Number, Self::Error>;
 
+    /// Create an empty map.
     fn create_map(&self) -> Self::Map;
 
+    /// Extend the given map with the provided key-value pair.
     fn extend_map(
         &self,
         map: &mut Self::Map,
@@ -120,13 +180,20 @@ trait Deserialization {
         value: Self::Any,
     ) -> Result<(), Self::Error>;
 
+    /// Perform any final transformations on a complete map.
     fn finish_map(&self, map: Self::Map) -> Result<Self::Any, Self::Error>;
 
+    /// Create an empty list.
     fn create_list(&self) -> Self::List;
 
+    /// Extend the given list with the provided value.
     fn extend_list(&self, list: &mut Self::List, value: Self::Any) -> Result<(), Self::Error>;
 }
 
+/// Wrapper type for any Python value.
+///
+/// This primary exists to support implementing `From<Bound<'py, T>>` to satisfy
+/// the `Into` bounds on the associated types of [`Deserialization`].
 #[repr(transparent)]
 struct BoundAny<'py>(Bound<'py, PyAny>);
 
@@ -136,6 +203,7 @@ impl<'py, T> From<Bound<'py, T>> for BoundAny<'py> {
     }
 }
 
+/// Deserialization to Python values.
 struct PyDeserialization<'py> {
     python: Python<'py>,
     object_hook: Option<&'py Bound<'py, PyFunction>>,
@@ -169,7 +237,7 @@ impl<'py> Deserialization for PyDeserialization<'py> {
     fn create_number(&self, value: &str, is_float: bool) -> Result<Self::Number, Self::Error> {
         match is_float {
             false => {
-                // Try parsing as a 64-bit number first; this is significantly
+                // Try parsing as a 64-bit integer first; this is significantly
                 // faster than using the Python int type constructor.
                 //
                 // We will use that constructor if parsing fails here in order
@@ -223,25 +291,48 @@ impl<'py> Deserialization for PyDeserialization<'py> {
     }
 }
 
+/// Byte-slice cursor.
+///
+/// This trait makes working with `&mut &[u8]` more ergonomic, as well as
+/// provides a starting point to handle e.g. streaming deserialization later.
 trait Cursor {
+    /// Look at the first byte, returning an EOF error if there is none.
     fn peek<T>(&self) -> Result<u8, ParseError<T>>;
 
-    fn skip(&mut self);
+    /// Skips to the next byte.
+    ///
+    /// # Panics
+    ///
+    /// This may panic if the cursor is viewing an empty slice.  This method
+    /// should not be used unless you have already verified that the slice is
+    /// not empty.
+    fn skip(&mut self) {
+        self.skip_n(1);
+    }
 
+    /// Skips over the given number of bytes.
+    ///
+    /// # Panics
+    ///
+    /// This may panic if the cursor is viewing a slice of less than the
+    /// provided number of bytes.  This method should not be used unless you
+    /// have already verified that the slice contains at least as many bytes as
+    /// are being skipped.
     fn skip_n(&mut self, n: usize);
 
+    /// Reads the next byte, returning an EOF error if there is none.
     fn read<T>(&mut self) -> Result<u8, ParseError<T>>;
 
+    /// Consumes all characters considered whitespace by the JSON specification.
+    ///
+    /// After calling this method, the byte slice must be either empty, or the
+    /// first character must not be whitespace.
     fn consume_whitespace(&mut self);
 }
 
 impl Cursor for &[u8] {
     fn peek<T>(&self) -> Result<u8, ParseError<T>> {
         self.first().copied().ok_or(ParseError::Eof)
-    }
-
-    fn skip(&mut self) {
-        self.skip_n(1);
     }
 
     fn skip_n(&mut self, n: usize) {
@@ -271,7 +362,13 @@ impl Cursor for &[u8] {
     }
 }
 
+/// Helper trait for the [`expect`] function.
 trait Expect {
+    /// Expect to see `self` at the start of the provided slice.
+    ///
+    /// If `b` begins with the value of `self`, `b` is adjusted to skip over
+    /// that value, and `true` is returned.  Otherwise, `false` is returned and
+    /// `b` is not adjusted.
     fn expect(self, b: &mut &[u8]) -> bool;
 }
 
@@ -288,10 +385,20 @@ impl<const N: usize> Expect for &[u8; N] {
 
 impl Expect for u8 {
     fn expect(self, b: &mut &[u8]) -> bool {
-        b.read::<()>().is_ok_and(|v| v == self)
+        if b.peek::<()>().is_ok_and(|v| v == self) {
+            b.skip();
+            true
+        } else {
+            false
+        }
     }
 }
 
+/// Expect a given value to be present at the beginning of the provided slice.
+///
+/// If `b` begins with `expected`, advances `b` past that value and returns `Ok(())`.
+///
+/// Otherwise, returns `Err(err())`.
 fn expect<T>(
     b: &mut &[u8],
     expected: impl Expect,
@@ -303,12 +410,13 @@ fn expect<T>(
     }
 }
 
+/// Parse the next JSON value from the provided slice.
 fn parse_any<'json, D: Deserialization>(
     deserialization: &D,
     b: &mut &'json [u8],
-) -> TrampolineResult<'json, D> {
-    TrampolineResult::<D>::Ok(match b.peek() {
-        Err(e) => return TrampolineResult::<D>::Err(e),
+) -> ThunkResult<'json, D> {
+    ThunkResult::<D>::Ok(match b.peek() {
+        Err(e) => return ThunkResult::<D>::Err(e),
 
         Ok(b'n') => {
             b.skip();
@@ -347,10 +455,11 @@ fn parse_any<'json, D: Deserialization>(
 
         Ok(b'-' | b'0'..=b'9') => trampoline_try!(parse_number(deserialization, b)).into(),
 
-        Ok(_) => return TrampolineResult::<D>::Err(ParseError::ExpectedAny),
+        Ok(_) => return ThunkResult::<D>::Err(ParseError::ExpectedAny),
     })
 }
 
+/// Parse a number from the provided slice.
 #[allow(clippy::manual_is_ascii_check)]
 fn parse_number<D: Deserialization>(
     deserialization: &D,
@@ -420,6 +529,7 @@ fn parse_number<D: Deserialization>(
         .map_err(ParseError::Custom)
 }
 
+/// Reads a single UTF-8 encoded character from the front of the slice.
 fn read_utf8_char<T>(b: &mut &[u8]) -> Result<char, ParseError<T>> {
     let first = b.read()?;
 
@@ -448,6 +558,14 @@ fn read_utf8_char<T>(b: &mut &[u8]) -> Result<char, ParseError<T>> {
     char::from_u32(val).ok_or(ParseError::InvalidUtf8)
 }
 
+/// Parse a string from the front of the slice.
+///
+/// This function should be called when `b` has already been advanced past the
+/// `"` character that began the string.
+///
+/// If the string contains no escape sequences, no allocations are required and
+/// this function will return a string borrowed from the input slice.
+/// Otherwise, an owned string will be returned with the decoded string value.
 fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseError<T>> {
     let start = *b;
 
@@ -493,10 +611,13 @@ fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseErro
                 'n' => buf.push('\n'),
                 'r' => buf.push('\r'),
                 't' => buf.push('\t'),
+
                 'u' => {
                     let c1 = parse_unicode_escape(b)?;
 
                     buf.push(match char::from_u32(c1.into()) {
+                        // char::from_u32 fails on surrogates, so if this
+                        // succeeds we are done.
                         Some(c) => c,
 
                         None => match c1 {
@@ -507,6 +628,9 @@ fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseErro
                                 let c2 = parse_unicode_escape(b)?;
 
                                 if !matches!(c2, 0xDC00..=0xDFFF) {
+                                    // The next character was not a trailing
+                                    // surrogate, so this is not a valid
+                                    // surrogate pair.
                                     return Err(ParseError::InvalidStringEscape);
                                 }
 
@@ -539,6 +663,10 @@ fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseErro
     }
 }
 
+/// Parses a unicode escape sequence.
+///
+/// The buffer should already be advanced past the `\u` sequence so that the
+/// first 4 bytes of the slice are expected to be hexadecimal digits.
 fn parse_unicode_escape<T>(b: &mut &[u8]) -> Result<u16, ParseError<T>> {
     if b.len() < 4 {
         return Err(ParseError::Eof);
@@ -546,37 +674,47 @@ fn parse_unicode_escape<T>(b: &mut &[u8]) -> Result<u16, ParseError<T>> {
 
     let hex = str::from_utf8(&b[0..4]).map_err(|_| ParseError::InvalidUtf8)?;
 
-    b.skip_n(4);
-
     if hex.len() != 4 {
+        // If the length is not 4 then there was at least one non-ASCII
+        // character, so they can't all be hex digits.
         return Err(ParseError::InvalidStringEscape);
     }
+
+    b.skip_n(4);
 
     u16::from_str_radix(hex, 16).map_err(|_| ParseError::InvalidStringEscape)
 }
 
+/// Parse a list from the front of the slice.
+///
+/// This function should be called when `b` has already been advanced past the
+/// `[` character that began the list.
 fn parse_list<'json, D: Deserialization>(
     deserialization: &D,
     b: &mut &'json [u8],
-) -> TrampolineResult<'json, D> {
+) -> ThunkResult<'json, D> {
     let list = deserialization.create_list();
 
     b.consume_whitespace();
 
     if trampoline_try!(b.peek()) == b']' {
         b.skip();
-        return TrampolineResult::<D>::Ok(list.into());
+        return ThunkResult::<D>::Ok(list.into());
     }
 
-    TrampolineResult::Incomplete(Trampoline::ParsingList(list))
+    ThunkResult::Thunk(Thunk::ParsingList(list))
 }
 
+/// Continue parsing a list.
+///
+/// This is called once the next value of a list has been parsed, and parsing
+/// the list itself is being resumed from a thunk.
 fn continue_parse_list<'json, D: Deserialization>(
     deserialization: &D,
     mut list: D::List,
     value: D::Any,
     b: &mut &'json [u8],
-) -> TrampolineResult<'json, D> {
+) -> ThunkResult<'json, D> {
     trampoline_try!(
         deserialization
             .extend_list(&mut list, value)
@@ -586,51 +724,59 @@ fn continue_parse_list<'json, D: Deserialization>(
     b.consume_whitespace();
 
     match trampoline_try!(b.read()) {
-        b']' => TrampolineResult::Ok(list.into()),
+        b']' => ThunkResult::Ok(list.into()),
 
         b',' => {
             b.consume_whitespace();
-            TrampolineResult::Incomplete(Trampoline::ParsingList(list))
+            ThunkResult::Thunk(Thunk::ParsingList(list))
         }
 
-        _ => TrampolineResult::Err(ParseError::ExpectedListItem),
+        _ => ThunkResult::Err(ParseError::ExpectedListItem),
     }
 }
 
+/// Parse a map from the front of the slice.
+///
+/// This function should be called when `b` has already been advanced past the
+/// `{` character that began the map.
 fn parse_map<'json, D: Deserialization>(
     deserialization: &D,
     b: &mut &'json [u8],
-) -> TrampolineResult<'json, D> {
+) -> ThunkResult<'json, D> {
     let dict = deserialization.create_map();
 
     b.consume_whitespace();
 
     let key = match trampoline_try!(b.read()) {
         b'}' => {
-            return TrampolineResult::<D>::Ok(trampoline_try!(
+            return ThunkResult::<D>::Ok(trampoline_try!(
                 deserialization.finish_map(dict).map_err(ParseError::Custom)
             ));
         }
 
         b'"' => trampoline_try!(parse_str(b)),
 
-        _ => return TrampolineResult::<D>::Err(ParseError::ExpectedMapItem),
+        _ => return ThunkResult::<D>::Err(ParseError::ExpectedMapItem),
     };
 
     b.consume_whitespace();
     trampoline_try!(expect(b, b':', || ParseError::ExpectedMapItem));
     b.consume_whitespace();
 
-    TrampolineResult::Incomplete(Trampoline::ParsingMap { dict, key })
+    ThunkResult::Thunk(Thunk::ParsingMap { dict, key })
 }
 
+/// Continue parsing a map.
+///
+/// This is called once the next value of a map has been parsed, and parsing the
+/// map itself is being resumed from a thunk.
 fn continue_parse_map<'json, D: Deserialization>(
     deserialization: &D,
     mut dict: D::Map,
     key: Cow<'json, str>,
     value: D::Any,
     b: &mut &'json [u8],
-) -> TrampolineResult<'json, D> {
+) -> ThunkResult<'json, D> {
     trampoline_try!(
         deserialization
             .extend_map(&mut dict, key, value)
@@ -640,7 +786,7 @@ fn continue_parse_map<'json, D: Deserialization>(
     b.consume_whitespace();
 
     match trampoline_try!(b.read()) {
-        b'}' => TrampolineResult::Ok(trampoline_try!(
+        b'}' => ThunkResult::Ok(trampoline_try!(
             deserialization.finish_map(dict).map_err(ParseError::Custom)
         )),
 
@@ -654,13 +800,22 @@ fn continue_parse_map<'json, D: Deserialization>(
             trampoline_try!(expect(b, b':', || ParseError::ExpectedMapItem));
             b.consume_whitespace();
 
-            TrampolineResult::Incomplete(Trampoline::ParsingMap { dict, key })
+            ThunkResult::Thunk(Thunk::ParsingMap { dict, key })
         }
 
-        _ => TrampolineResult::Err(ParseError::ExpectedMapItem),
+        _ => ThunkResult::Err(ParseError::ExpectedMapItem),
     }
 }
 
+/// Parse a JSON value.
+///
+/// `json` must contain a UTF-8 encoded string of data that represents a single
+/// valid JSON value.
+///
+/// `object_hook` is an optional Python function that will be called on maps
+/// that have been fully decoded.  The hook can return any valid Python value,
+/// which will take the place of the Python dict in the deserialized object
+/// graph.
 pub fn parse_json<'py>(
     python: Python<'py>,
     mut json: &[u8],
@@ -681,23 +836,23 @@ pub fn parse_json<'py>(
 
     let result = loop {
         last_any = match last_any {
-            TrampolineResult::Err(e) => {
+            ThunkResult::Err(e) => {
                 return Err(e.into_pyerr_with_location(python, len - json.len()));
             }
 
-            TrampolineResult::Incomplete(op) => {
+            ThunkResult::Thunk(op) => {
                 stack.push(op);
 
                 parse_any(&deserialization, &mut json)
             }
 
-            TrampolineResult::Ok(value) => match stack.pop() {
+            ThunkResult::Ok(value) => match stack.pop() {
                 Some(op) => match op {
-                    Trampoline::ParsingList(list) => {
+                    Thunk::ParsingList(list) => {
                         continue_parse_list(&deserialization, list, value, &mut json)
                     }
 
-                    Trampoline::ParsingMap { dict, key } => {
+                    Thunk::ParsingMap { dict, key } => {
                         continue_parse_map(&deserialization, dict, key, value, &mut json)
                     }
                 },
