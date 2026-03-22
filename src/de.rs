@@ -45,7 +45,7 @@ enum Thunk<'json, D: Deserialization> {
 ///
 /// This allows for more ergonomic usage of `Result`-returning functions from
 /// within a function that returns `ThunkResult`.
-macro_rules! trampoline_try {
+macro_rules! thunk_try {
     ( $e:expr ) => {
         match $e {
             ::std::result::Result::Ok(v) => v,
@@ -420,26 +420,26 @@ fn parse_any<'json, D: Deserialization>(
 
         Ok(b'n') => {
             b.skip();
-            trampoline_try!(expect(b, b"ull", || ParseError::Expected("null")));
+            thunk_try!(expect(b, b"ull", || ParseError::Expected("null")));
             deserialization.create_null().into()
         }
 
         Ok(b'f') => {
             b.skip();
-            trampoline_try!(expect(b, b"alse", || ParseError::Expected("false")));
+            thunk_try!(expect(b, b"alse", || ParseError::Expected("false")));
             deserialization.create_bool(false).into()
         }
 
         Ok(b't') => {
             b.skip();
-            trampoline_try!(expect(b, b"rue", || ParseError::Expected("true")));
+            thunk_try!(expect(b, b"rue", || ParseError::Expected("true")));
             deserialization.create_bool(true).into()
         }
 
         Ok(b'"') => {
             b.skip();
             deserialization
-                .create_string(&trampoline_try!(parse_str(b)))
+                .create_string(&thunk_try!(parse_str(b)))
                 .into()
         }
 
@@ -453,7 +453,7 @@ fn parse_any<'json, D: Deserialization>(
             return parse_map(deserialization, b);
         }
 
-        Ok(b'-' | b'0'..=b'9') => trampoline_try!(parse_number(deserialization, b)).into(),
+        Ok(b'-' | b'0'..=b'9') => thunk_try!(parse_number(deserialization, b)).into(),
 
         Ok(_) => return ThunkResult::<D>::Err(ParseError::ExpectedAny),
     })
@@ -697,7 +697,7 @@ fn parse_list<'json, D: Deserialization>(
 
     b.consume_whitespace();
 
-    if trampoline_try!(b.peek()) == b']' {
+    if thunk_try!(b.peek()) == b']' {
         b.skip();
         return ThunkResult::<D>::Ok(list.into());
     }
@@ -715,7 +715,7 @@ fn continue_parse_list<'json, D: Deserialization>(
     value: D::Any,
     b: &mut &'json [u8],
 ) -> ThunkResult<'json, D> {
-    trampoline_try!(
+    thunk_try!(
         deserialization
             .extend_list(&mut list, value)
             .map_err(ParseError::Custom)
@@ -723,7 +723,7 @@ fn continue_parse_list<'json, D: Deserialization>(
 
     b.consume_whitespace();
 
-    match trampoline_try!(b.read()) {
+    match thunk_try!(b.read()) {
         b']' => ThunkResult::Ok(list.into()),
 
         b',' => {
@@ -747,20 +747,20 @@ fn parse_map<'json, D: Deserialization>(
 
     b.consume_whitespace();
 
-    let key = match trampoline_try!(b.read()) {
+    let key = match thunk_try!(b.read()) {
         b'}' => {
-            return ThunkResult::<D>::Ok(trampoline_try!(
+            return ThunkResult::<D>::Ok(thunk_try!(
                 deserialization.finish_map(dict).map_err(ParseError::Custom)
             ));
         }
 
-        b'"' => trampoline_try!(parse_str(b)),
+        b'"' => thunk_try!(parse_str(b)),
 
         _ => return ThunkResult::<D>::Err(ParseError::ExpectedMapItem),
     };
 
     b.consume_whitespace();
-    trampoline_try!(expect(b, b':', || ParseError::ExpectedMapItem));
+    thunk_try!(expect(b, b':', || ParseError::ExpectedMapItem));
     b.consume_whitespace();
 
     ThunkResult::Thunk(Thunk::ParsingMap { dict, key })
@@ -777,7 +777,7 @@ fn continue_parse_map<'json, D: Deserialization>(
     value: D::Any,
     b: &mut &'json [u8],
 ) -> ThunkResult<'json, D> {
-    trampoline_try!(
+    thunk_try!(
         deserialization
             .extend_map(&mut dict, key, value)
             .map_err(ParseError::Custom)
@@ -785,19 +785,19 @@ fn continue_parse_map<'json, D: Deserialization>(
 
     b.consume_whitespace();
 
-    match trampoline_try!(b.read()) {
-        b'}' => ThunkResult::Ok(trampoline_try!(
+    match thunk_try!(b.read()) {
+        b'}' => ThunkResult::Ok(thunk_try!(
             deserialization.finish_map(dict).map_err(ParseError::Custom)
         )),
 
         b',' => {
             b.consume_whitespace();
-            trampoline_try!(expect(b, b'"', || ParseError::ExpectedMapItem));
+            thunk_try!(expect(b, b'"', || ParseError::ExpectedMapItem));
 
-            let key = trampoline_try!(parse_str(b));
+            let key = thunk_try!(parse_str(b));
 
             b.consume_whitespace();
-            trampoline_try!(expect(b, b':', || ParseError::ExpectedMapItem));
+            thunk_try!(expect(b, b':', || ParseError::ExpectedMapItem));
             b.consume_whitespace();
 
             ThunkResult::Thunk(Thunk::ParsingMap { dict, key })
