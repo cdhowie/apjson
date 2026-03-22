@@ -28,4 +28,11 @@ mod apjson {
 
         crate::de::parse_json(json.py(), bytes, object_hook)
     }
+
+    /// Serialize a value as JSON.
+    #[pyfunction]
+    #[pyo3(signature = (value))]
+    fn dumps<'py>(value: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyBytes>> {
+        crate::ser::into_json(value)
+    }
 }
