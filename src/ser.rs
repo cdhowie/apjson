@@ -174,6 +174,7 @@ fn any_to_json_native<'py>(
     Ok(())
 }
 
+/// Serialize the given int to the buffer.
 fn int_to_json(buf: &mut Vec<u8>, i: &Bound<'_, PyInt>) -> PyResult<()> {
     // Try as u64 and i64 first, since these don't require an allocation.
     // Otherwise, fall back to writing the value as a string, which creates a
