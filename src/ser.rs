@@ -137,16 +137,7 @@ fn any_to_json_native<'py>(
     } else if let Ok(s) = value.cast::<PyString>() {
         string_to_json(&mut state.buffer, s.to_str()?);
     } else if let Ok(i) = value.cast::<PyInt>() {
-        // Try as u64 and i64 first, since these don't require an allocation.
-        // Otherwise, fall back to writing the value as a string, which creates
-        // a PyString (and therefore allocates).
-        if let Ok(v) = i.extract::<u64>() {
-            write!(state.buffer, "{v}").unwrap();
-        } else if let Ok(v) = i.extract::<i64>() {
-            write!(state.buffer, "{v}").unwrap();
-        } else {
-            write!(state.buffer, "{i}").unwrap();
-        }
+        int_to_json(&mut state.buffer, i)?;
     } else if let Ok(f) = value.cast::<PyFloat>().map(|f| f.value()) {
         if !f.is_finite() {
             return Err(AnyToJsonNativeError::Serialization(PyErr::new::<
@@ -175,6 +166,22 @@ fn any_to_json_native<'py>(
         state.buffer.extend(f.borrow().0.as_bytes(value.py()));
     } else {
         return Err(AnyToJsonNativeError::UnsupportedType(value.get_type()));
+    }
+
+    Ok(())
+}
+
+fn int_to_json(buf: &mut Vec<u8>, i: &Bound<'_, PyInt>) -> PyResult<()> {
+    // Try as u64 and i64 first, since these don't require an allocation.
+    // Otherwise, fall back to writing the value as a string, which creates a
+    // PyString (and therefore allocates).
+    if let Ok(v) = i.extract::<u64>() {
+        write!(buf, "{v}").unwrap();
+    } else if let Ok(v) = i.extract::<i64>() {
+        write!(buf, "{v}").unwrap();
+    } else {
+        let s = i.str()?;
+        buf.extend(s.to_str()?.as_bytes());
     }
 
     Ok(())
