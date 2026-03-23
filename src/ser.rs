@@ -128,6 +128,9 @@ fn any_to_json_native<'py>(
     state: &mut State<'py>,
     value: &Bound<'py, PyAny>,
 ) -> Result<(), AnyToJsonNativeError<'py>> {
+    // The order here matters, as certain types will coerce in a cast.  For
+    // example, we have to check bools before trying to cast to PyInt, because
+    // bools will coerce to ints.
     if value.is_none() {
         state.buffer.extend(b"null");
     } else if value.is(PyBool::new(value.py(), true)) {
@@ -249,8 +252,33 @@ fn dict_item_to_json<'py>(
     key: &Bound<'py, PyAny>,
     item: &Bound<'py, PyAny>,
 ) -> PyResult<()> {
-    let key = key.str()?;
-    string_to_json(&mut state.buffer, key.to_str()?);
+    // Like any_to_json_native, we have to be careful about order here in some
+    // cases.  However, none of the types here will coerce to PyString, so we
+    // test that first since it's the most likely.
+    //
+    // While Python's json module supports float keys, we do not.  This is
+    // intentional, since floats can have different representations depending on
+    // which library is doing the encoding.  The result is effectively
+    // "non-portable" keys, which isn't useful.
+    if let Ok(s) = key.cast::<PyString>() {
+        string_to_json(&mut state.buffer, s.to_str()?);
+    } else if key.is(PyBool::new(key.py(), true)) {
+        state.buffer.extend(b"\"true\"");
+    } else if key.is(PyBool::new(key.py(), false)) {
+        state.buffer.extend(b"\"false\"");
+    } else if let Ok(i) = key.cast::<PyInt>() {
+        // None of the characters in an int will need to be escaped.
+        state.buffer.push(b'"');
+        int_to_json(&mut state.buffer, i)?;
+        state.buffer.push(b'"');
+    } else if key.is_none() {
+        state.buffer.extend(b"\"null\"");
+    } else {
+        return Err(PyErr::new::<PyValueError, _>(format!(
+            "cannot serialize key type: {}",
+            key.get_type(),
+        )));
+    }
 
     state.buffer.push(b':');
 
