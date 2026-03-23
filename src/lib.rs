@@ -31,12 +31,13 @@ mod apjson {
 
     /// Serialize a value as JSON.
     #[pyfunction]
-    #[pyo3(signature = (value, /, object_hook = None))]
+    #[pyo3(signature = (value, /, object_hook = None, check_circular = true))]
     fn dumps<'py>(
         value: &Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
+        check_circular: bool,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        crate::ser::into_json(value, object_hook)
+        crate::ser::into_json(value, object_hook, check_circular)
     }
 
     #[pymodule_export]

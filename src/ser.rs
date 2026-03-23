@@ -42,15 +42,49 @@ impl Fragment {
 struct State<'py> {
     buffer: Vec<u8>,
     object_hook: Option<&'py Bound<'py, PyFunction>>,
+    object_stack: Option<Vec<usize>>,
+}
+
+impl<'py> State<'py> {
+    /// Records that the given object has been seen, returning an error if it
+    /// was previously seen.
+    fn push_object<T>(&mut self, object: &Bound<'py, T>) -> PyResult<()> {
+        if let Some(stack) = &mut self.object_stack {
+            let addr = object.as_ptr().addr();
+
+            if stack.contains(&addr) {
+                return Err(PyErr::new::<PyValueError, _>("cycle detected"));
+            }
+
+            stack.push(addr);
+        }
+
+        Ok(())
+    }
+
+    /// Pops the given object from the stack of seen objects.
+    fn pop_object<T>(&mut self, object: &Bound<'py, T>) {
+        if let Some(stack) = &mut self.object_stack {
+            let top = stack.pop();
+
+            debug_assert_eq!(top, Some(object.as_ptr().addr()));
+        }
+    }
 }
 
 /// Serialize the given value to the buffer.
 fn any_to_json<'py>(state: &mut State<'py>, value: &Bound<'py, PyAny>) -> PyResult<()> {
     match (any_to_json_native(state, value), state.object_hook) {
         (Err(AnyToJsonNativeError::UnsupportedType(_)), Some(hook)) => {
+            state.push_object(value)?;
+
             // If we have an object hook, we can try calling that and then
             // serializing the result.
-            any_to_json_native(state, &hook.call1((value,))?)
+            let r = any_to_json_native(state, &hook.call1((value,))?);
+
+            state.pop_object(value);
+
+            r
         }
 
         (r, _) => r,
@@ -107,11 +141,17 @@ fn any_to_json_native<'py>(
     } else if let Ok(f) = value.cast::<PyFloat>() {
         write!(state.buffer, "{}", f.value()).unwrap();
     } else if let Ok(l) = value.cast::<PyList>() {
+        state.push_object(l)?;
         list_to_json(state, l.iter())?;
+        state.pop_object(l);
     } else if let Ok(t) = value.cast::<PyTuple>() {
+        state.push_object(t)?;
         list_to_json(state, t.iter())?;
+        state.pop_object(t);
     } else if let Ok(d) = value.cast::<PyDict>() {
+        state.push_object(d)?;
         dict_to_json(state, d)?;
+        state.pop_object(d);
     } else if let Ok(f) = value.cast::<Fragment>() {
         state.buffer.extend(f.borrow().0.as_bytes(value.py()));
     } else {
@@ -216,10 +256,12 @@ fn dict_to_json<'py>(state: &mut State<'py>, dict: &Bound<'py, PyDict>) -> PyRes
 pub fn into_json<'py>(
     value: &Bound<'py, PyAny>,
     object_hook: Option<&'py Bound<'py, PyFunction>>,
+    check_circular: bool,
 ) -> PyResult<Bound<'py, PyBytes>> {
     let mut state = State {
         buffer: vec![],
         object_hook,
+        object_stack: check_circular.then(Vec::new),
     };
 
     any_to_json(&mut state, value)?;
