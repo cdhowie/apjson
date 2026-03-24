@@ -32,7 +32,7 @@ enum Thunk<'json, D: Deserialization> {
         /// Map being parsed.
         dict: D::Map,
         /// The next key to be added.
-        key: Cow<'json, str>,
+        key: Cow<'json, [u8]>,
     },
 }
 
@@ -139,7 +139,9 @@ trait Deserialization {
     fn create_bool(&self, value: bool) -> Self::Bool;
 
     /// Create the given string value.
-    fn create_string(&self, value: &str) -> Self::String;
+    ///
+    /// The given value is not guaranteed to be valid UTF-8.
+    fn create_string(&self, value: &[u8]) -> Result<Self::String, Self::Error>;
 
     /// Create the given number value.
     ///
@@ -151,10 +153,12 @@ trait Deserialization {
     fn create_map(&self) -> Self::Map;
 
     /// Extend the given map with the provided key-value pair.
+    ///
+    /// The given key is not guaranteed to be valid UTF-8.
     fn extend_map(
         &self,
         map: &mut Self::Map,
-        key: Cow<'_, str>,
+        key: &[u8],
         value: Self::Any,
     ) -> Result<(), Self::Error>;
 
@@ -208,8 +212,8 @@ impl<'py> Deserialization for PyDeserialization<'py> {
         PyBool::new(self.python, value).to_owned()
     }
 
-    fn create_string(&self, value: &str) -> Self::String {
-        PyString::new(self.python, value)
+    fn create_string(&self, value: &[u8]) -> Result<Self::String, Self::Error> {
+        PyString::from_bytes(self.python, value)
     }
 
     fn create_number(&self, value: &str, is_float: bool) -> Result<Self::Number, Self::Error> {
@@ -249,10 +253,10 @@ impl<'py> Deserialization for PyDeserialization<'py> {
     fn extend_map(
         &self,
         map: &mut Self::Map,
-        key: Cow<'_, str>,
+        key: &[u8],
         value: Self::Any,
     ) -> Result<(), Self::Error> {
-        map.set_item(key, value.0)
+        map.set_item(self.create_string(key)?, value.0)
     }
 
     fn finish_map(&self, map: Self::Map) -> Result<Self::Any, Self::Error> {
@@ -286,13 +290,17 @@ impl Deserialization for ValidateDeserialization {
     type Map = ();
     type List = ();
 
-    type Error = std::convert::Infallible;
+    type Error = std::str::Utf8Error;
 
     fn create_null(&self) -> Self::Null {}
 
     fn create_bool(&self, _value: bool) -> Self::Bool {}
 
-    fn create_string(&self, _value: &str) -> Self::String {}
+    fn create_string(&self, value: &[u8]) -> Result<Self::String, Self::Error> {
+        str::from_utf8(value)?;
+
+        Ok(())
+    }
 
     fn create_number(&self, _value: &str, _is_float: bool) -> Result<Self::Number, Self::Error> {
         Ok(())
@@ -303,9 +311,11 @@ impl Deserialization for ValidateDeserialization {
     fn extend_map(
         &self,
         _map: &mut Self::Map,
-        _key: Cow<'_, str>,
+        key: &[u8],
         _value: Self::Any,
     ) -> Result<(), Self::Error> {
+        str::from_utf8(key)?;
+
         Ok(())
     }
 
@@ -467,9 +477,12 @@ fn parse_any<'json, D: Deserialization>(
 
         Ok(b'"') => {
             b.skip();
-            deserialization
-                .create_string(&thunk_try!(parse_str(b)))
-                .into()
+            thunk_try!(
+                deserialization
+                    .create_string(&thunk_try!(parse_str(b)))
+                    .map_err(ParseError::Custom)
+            )
+            .into()
         }
 
         Ok(b'[') => {
@@ -558,44 +571,19 @@ fn parse_number<D: Deserialization>(
         .map_err(ParseError::Custom)
 }
 
-/// Reads a single UTF-8 encoded character from the front of the slice.
-fn read_utf8_char<T>(b: &mut &[u8]) -> Result<char, ParseError<T>> {
-    let first = b.read()?;
-
-    let (mut val, additional) = if first & 0b10000000 == 0 {
-        return Ok(first as char);
-    } else if first & 0b11100000 == 0b11000000 {
-        (u32::from(first & 0b00011111), 1)
-    } else if first & 0b11110000 == 0b11100000 {
-        (u32::from(first & 0b00001111), 2)
-    } else if first & 0b11111000 == 0b11110000 {
-        (u32::from(first & 0b00000111), 3)
-    } else {
-        return Err(ParseError::InvalidUtf8);
-    };
-
-    for _ in 0..additional {
-        let c = b.read::<()>().map_err(|_| ParseError::InvalidUtf8)?;
-
-        if c & 0b11000000 != 0b10000000 {
-            return Err(ParseError::InvalidUtf8);
-        }
-
-        val = (val << 6) | u32::from(c & 0b00111111);
-    }
-
-    char::from_u32(val).ok_or(ParseError::InvalidUtf8)
-}
-
 /// Parse a string from the front of the slice.
 ///
 /// This function should be called when `b` has already been advanced past the
 /// `"` character that began the string.
 ///
 /// If the string contains no escape sequences, no allocations are required and
-/// this function will return a string borrowed from the input slice.
-/// Otherwise, an owned string will be returned with the decoded string value.
-fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseError<T>> {
+/// this function will return a string borrowed from the input slice. Otherwise,
+/// an owned string will be returned with the decoded string value.
+///
+/// Note this function does not guarantee that a successfully-produced value is
+/// valid UTF-8.  This is because the Python side will also validate the byte
+/// string as UTF-8, so validating it here is wasted effort.
+fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, [u8]>, ParseError<T>> {
     let start = *b;
 
     // Start under the assumption that we can borrow the encoded string.  The
@@ -606,20 +594,16 @@ fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseErro
                 let bytes = start.len() - b.len();
                 b.skip();
 
-                return Ok(Cow::Borrowed(
-                    str::from_utf8(&start[0..bytes]).map_err(|_| ParseError::InvalidUtf8)?,
-                ));
+                return Ok(Cow::Borrowed(&start[0..bytes]));
             }
 
             b'\\' => {
                 let bytes = start.len() - b.len();
 
-                // Convert what we've already read into an owned string and fall
-                // down to the next loop, which handles building an owned
-                // string.
-                break str::from_utf8(&start[0..bytes])
-                    .map_err(|_| ParseError::InvalidUtf8)?
-                    .to_owned();
+                // Convert what we've already read into an owned byte string and
+                // fall down to the next loop, which handles building the rest
+                // of the owned string.
+                break start[0..bytes].to_owned();
             }
 
             c if c < b' ' => return Err(ParseError::UnescapedControlCharacter),
@@ -631,20 +615,18 @@ fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseErro
     };
 
     loop {
-        let c = read_utf8_char(b)?;
+        match b.read()? {
+            b'\\' => match b.read()? {
+                b'b' => buf.push(b'\x08'),
+                b'f' => buf.push(b'\x0C'),
+                b'n' => buf.push(b'\n'),
+                b'r' => buf.push(b'\r'),
+                b't' => buf.push(b'\t'),
 
-        match c {
-            '\\' => match read_utf8_char(b)? {
-                'b' => buf.push('\x08'),
-                'f' => buf.push('\x0C'),
-                'n' => buf.push('\n'),
-                'r' => buf.push('\r'),
-                't' => buf.push('\t'),
-
-                'u' => {
+                b'u' => {
                     let c1 = parse_unicode_escape(b)?;
 
-                    buf.push(match char::from_u32(c1.into()) {
+                    let codepoint = match char::from_u32(c1.into()) {
                         // char::from_u32 fails on surrogates, so if this
                         // succeeds we are done.
                         Some(c) => c,
@@ -675,17 +657,21 @@ fn parse_str<'json, T>(b: &mut &'json [u8]) -> Result<Cow<'json, str>, ParseErro
                             // from_u32 should have returned Some in this case.
                             _ => unreachable!(),
                         },
-                    });
+                    };
+
+                    let mut utf8_buf = [0; 4];
+
+                    buf.extend(codepoint.encode_utf8(&mut utf8_buf).as_bytes());
                 }
 
-                c @ ('\\' | '/' | '"') => buf.push(c),
+                c @ (b'\\' | b'/' | b'"') => buf.push(c),
 
                 _ => return Err(ParseError::InvalidStringEscape),
             },
 
-            '"' => return Ok(Cow::Owned(buf)),
+            b'"' => return Ok(Cow::Owned(buf)),
 
-            c if c < ' ' => return Err(ParseError::UnescapedControlCharacter),
+            c if c < b' ' => return Err(ParseError::UnescapedControlCharacter),
 
             c => buf.push(c),
         };
@@ -802,13 +788,13 @@ fn parse_map<'json, D: Deserialization>(
 fn continue_parse_map<'json, D: Deserialization>(
     deserialization: &D,
     mut dict: D::Map,
-    key: Cow<'json, str>,
+    key: Cow<'json, [u8]>,
     value: D::Any,
     b: &mut &'json [u8],
 ) -> ThunkResult<'json, D> {
     thunk_try!(
         deserialization
-            .extend_map(&mut dict, key, value)
+            .extend_map(&mut dict, &key, value)
             .map_err(ParseError::Custom)
     );
 
