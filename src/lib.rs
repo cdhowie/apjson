@@ -1,6 +1,8 @@
 use pyo3::prelude::*;
 
 mod de;
+#[cfg(feature = "pymem-alloc")]
+mod pymem;
 mod ser;
 mod thunk;
 

@@ -3,6 +3,10 @@ name = "apjson"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["pymem-alloc"]
+pymem-alloc = []
+
 [profile.release]
 debug = false
 opt-level = 3
