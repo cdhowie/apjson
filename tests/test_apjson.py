@@ -1,3 +1,5 @@
+import pytest
+
 import apjson
 import json
 
@@ -74,3 +76,21 @@ def test_dumps_objecthook():
             "value": 42,
         },
     }
+
+def test_loads_objecthook_passes_error():
+    def hook(v):
+        raise RuntimeError('from hook')
+
+    with pytest.raises(RuntimeError) as e:
+        apjson.loads('{}', object_hook=hook)
+
+    assert str(e.value) == 'from hook'
+
+def test_dumps_objecthook_passes_error():
+    def hook(v):
+        raise RuntimeError('from hook')
+
+    with pytest.raises(RuntimeError) as e:
+        apjson.dumps(CustomValue(42), object_hook=hook)
+
+    assert str(e.value) == 'from hook'
