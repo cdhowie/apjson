@@ -2,6 +2,7 @@ import pytest
 
 import apjson
 import json
+import math
 
 from pathlib import Path
 
@@ -94,3 +95,14 @@ def test_dumps_objecthook_passes_error():
         apjson.dumps(CustomValue(42), object_hook=hook)
 
     assert str(e.value) == 'from hook'
+
+def test_dumps_invalid_values_raise_valueerror():
+    for case in [
+        math.inf,
+        -math.inf,
+        math.nan,
+        CustomValue(42),
+        {1.2: 3},
+    ]:
+        with pytest.raises(ValueError):
+            apjson.dumps(case)
