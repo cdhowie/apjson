@@ -29,3 +29,46 @@ def test_jsontestsuite():
             except Exception as e:
                 e.add_note(f"test case {file.name}")
                 raise
+
+class CustomValue:
+    def __init__(self, value):
+        self.value = value
+
+    def __eq__(self, other):
+        return isinstance(other, CustomValue) and self.value == other.value
+
+def test_loads_objecthook():
+    def hook(v):
+        if v.get('type') == '$custom':
+            return CustomValue(v['value'])
+
+        return v
+
+    result = apjson.loads('{"foo":"bar","custom":{"type":"$custom","value":42}}', object_hook=hook)
+
+    assert result == {
+        "foo": "bar",
+        "custom": CustomValue(42),
+    }
+
+def test_dumps_objecthook():
+    def hook(v):
+        if isinstance(v, CustomValue):
+            return {"type": "$custom", "value": v.value}
+
+        return v
+
+    result = apjson.dumps({
+        "foo": "bar",
+        "custom": CustomValue(42),
+    }, object_hook=hook)
+
+    parsed = apjson.loads(result)
+
+    assert parsed == {
+        "foo": "bar",
+        "custom": {
+            "type": "$custom",
+            "value": 42,
+        },
+    }
