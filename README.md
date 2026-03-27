@@ -1,5 +1,7 @@
 # apjson
 
+[![CI](https://github.com/cdhowie/apjson/actions/workflows/CI.yml/badge.svg)](https://github.com/cdhowie/apjson/actions/workflows/CI.yml)
+
 An experimental JSON encoder/decoder Python module written in Rust.
 
 Goals:
