@@ -17,4 +17,4 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: File Formats :: JSON",
 ]
-dynamic = ["version"]
+dynamic = ["description", "readme", "urls", "authors", "license", "version"]
