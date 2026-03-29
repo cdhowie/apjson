@@ -60,7 +60,7 @@ impl<'py> Iterator for SequenceIterator<'py> {
     }
 }
 
-/// Create a JSON fragment from a bytes value, which must contain an
+/// Create a JSON fragment from a `bytes` value, which must contain an
 /// already-encoded JSON value.
 ///
 /// If a fragment is encountered during serialization, the fragment contents are
@@ -68,8 +68,13 @@ impl<'py> Iterator for SequenceIterator<'py> {
 /// placed inside of a structure that will be serialized to JSON, without the
 /// overhead of deserializing it and re-serializing it.
 ///
-/// By default, the provided bytes value is validated and an error thrown if it
-/// does not contain valid JSON.  Specify `validate=False` to skip validation.
+/// By default, the provided `bytes` value is validated and an error thrown if
+/// it does not contain valid JSON.  Specify `validate=False` to skip
+/// validation.
+///
+/// `depth_limit` specifies how deep the structure can be if validation is
+/// enabled.  If provided and the given structure exceeds the depth limit during
+/// validation, an error will be immediately raised.
 #[pyclass(frozen)]
 pub struct Fragment(Py<PyBytes>);
 
