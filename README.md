@@ -58,13 +58,10 @@ This list may not be exhaustive.
 
 * There is currently no streaming support (`load` and `dump` are absent).  This
   may be added in the future.
-* For efficiency, `dumps` produces a UTF-8 encoded `bytes` instead of a `str`.
-  The rationale is that the return value is often immediately written to a file
-  or network socket anyway.
 * Non-finite float values (`NaN`, `Infinity`, `-Infinity`) are rejected during
   encoding and decoding as they are not valid JSON.
-* `dumps` does not support `float` `dict` keys.  The JSON specification does not
-  guarantee a particular method of formatting float values, nor does it
+* `dumpb`/`dumps` does not support `float` `dict` keys.  The JSON specification
+  does not guarantee a particular method of formatting float values, nor does it
   guarantee any specific level of precision.  The lack of a canonical float
   representation means `float` keys are of dubious value.
 * `loads` does not support `bytearray` objects.  This is because they are
