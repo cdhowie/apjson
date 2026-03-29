@@ -78,7 +78,7 @@ impl Fragment {
     /// By default, the provided byte string is validated and an error thrown if
     /// validation fails.  Specify `validate=False` to skip validation.
     #[new]
-    #[pyo3(signature = (bytes, /, validate = true))]
+    #[pyo3(signature = (bytes, *, validate = true))]
     fn new<'py>(bytes: Bound<'py, PyBytes>, validate: bool) -> PyResult<Self> {
         if validate {
             crate::de::validate_json(bytes.py(), bytes.as_bytes())?;

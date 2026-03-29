@@ -20,7 +20,7 @@ mod queson {
     /// This function accepts either `bytes` or `str`.  A `bytes` will be more
     /// efficient, as a `str` will be UTF-8 encoded first.
     #[pyfunction]
-    #[pyo3(signature = (json, /, object_hook = None))]
+    #[pyo3(signature = (json, *, object_hook = None))]
     fn loads<'py>(
         json: &Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
@@ -41,7 +41,7 @@ mod queson {
     /// This function accepts either `bytes` or `str`.  A `bytes` will be more
     /// efficient, as a `str` will be UTF-8 encoded first.
     #[pyfunction]
-    #[pyo3(signature = (json, /, object_hook = None))]
+    #[pyo3(signature = (json, *, object_hook = None))]
     fn loadb<'py>(
         json: &Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
@@ -54,7 +54,7 @@ mod queson {
     /// Consider using `dumpb` instead, as it will be faster when you can use a
     /// UTF-8 encoded `bytes` instead.
     #[pyfunction]
-    #[pyo3(signature = (value, /, object_hook = None, check_circular = true))]
+    #[pyo3(signature = (value, *, object_hook = None, check_circular = true))]
     fn dumps<'py>(
         value: &Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
@@ -68,7 +68,7 @@ mod queson {
 
     /// Serialize a value into a UTF-8 encoded JSON `bytes`.
     #[pyfunction]
-    #[pyo3(signature = (value, /, object_hook = None, check_circular = true))]
+    #[pyo3(signature = (value, *, object_hook = None, check_circular = true))]
     fn dumpb<'py>(
         value: &Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
