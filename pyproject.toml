@@ -17,4 +17,8 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: File Formats :: JSON",
 ]
-dynamic = ["description", "readme", "urls", "authors", "license", "version"]
+dynamic = ["description", "readme", "authors", "license", "version"]
+
+[project.urls]
+repository = "https://github.com/cdhowie/queson"
+changelog = "https://github.com/cdhowie/queson/blob/master/CHANGELOG.md"
