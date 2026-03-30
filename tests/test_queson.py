@@ -36,8 +36,7 @@ def test_jsontestsuite() -> None:
                     if file.name.startswith('y_'):
                         assert json.loads(content) == result
             except Exception as e:
-                e.add_note(f"test case {file.name}")
-                raise
+                raise RuntimeError(f"test case {file.name} failed") from e
 
 class CustomValue:
     def __init__(self, value: typing.Any) -> None:
