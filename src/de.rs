@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{convert::Infallible, num::NonZeroUsize};
 
 use pyo3::{
     exceptions::PyValueError,
@@ -314,14 +314,14 @@ impl Deserialization for ValidateDeserialization {
     type Map = ();
     type List = ();
 
-    type Error = std::str::Utf8Error;
+    type Error = Infallible;
 
     fn create_null(&self) -> Self::Null {}
 
     fn create_bool(&self, _value: bool) -> Self::Bool {}
 
     fn create_string(&self, value: &[u8]) -> Result<Self::String, ParseError<Self::Error>> {
-        str::from_utf8(value).map_err(ParseError::Custom)?;
+        str::from_utf8(value).map_err(|_| ParseError::InvalidUtf8)?;
 
         Ok(())
     }
