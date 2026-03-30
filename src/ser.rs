@@ -254,16 +254,11 @@ fn int_to_json(buf: &mut Vec<u8>, i: &Bound<'_, PyInt>) -> PyResult<()> {
     if let Ok(v) = i.extract::<u64>() {
         write_native_int(buf, v);
     } else if let Ok(v) = i.extract::<i64>() {
-        match v {
-            0 => buf.push(b'0'),
-
-            1.. => write_native_int(buf, v as u64),
-
-            ..0 => {
-                buf.push(b'-');
-                write_native_int(buf, v.unsigned_abs());
-            }
-        }
+        // The range 0.. should be impossible here, since anything in that range
+        // would extract as a u64 successfully and be handled above, so just
+        // assume we have a negative number.
+        buf.push(b'-');
+        write_native_int(buf, v.unsigned_abs());
     } else {
         let s = i.str()?;
         buf.extend(s.to_str()?.as_bytes());
