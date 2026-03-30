@@ -1,3 +1,7 @@
+# 0.2.2
+
+* Fixed `depth_limit` argument missing in type stubs.
+
 # 0.2.1
 
 * Added `depth_limit` option to all deserialization/validation functions.
