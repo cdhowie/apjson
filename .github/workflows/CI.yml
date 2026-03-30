@@ -63,8 +63,8 @@ jobs:
           python3 -m venv .venv
           source .venv/bin/activate
           pip install queson --no-index --find-links dist --force-reinstall
-          pip install pytest
-          pytest tests
+          pip install pytest pytest-mypy
+          pytest --mypy tests
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') && matrix.platform.target != 'ppc64' }}
         uses: uraimo/run-on-arch-action@v2
@@ -79,7 +79,7 @@ jobs:
           run: |
             set -e
             pip3 install queson --no-index --find-links dist --force-reinstall
-            pytest tests
+            pytest --mypy tests
 
   musllinux:
     runs-on: ${{ matrix.platform.runner }}
@@ -122,8 +122,8 @@ jobs:
             python3 -m virtualenv .venv
             source .venv/bin/activate
             pip install queson --no-index --find-links dist --force-reinstall
-            pip install pytest
-            pytest tests
+            pip install pytest pytest-mypy
+            pytest --mypy tests
           '
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') }}
@@ -138,9 +138,9 @@ jobs:
             set -e
             python3 -m virtualenv .venv
             source .venv/bin/activate
-            pip install pytest
+            pip install pytest pytest-mypy
             pip install queson --no-index --find-links dist --force-reinstall
-            pytest tests
+            pytest --mypy tests
 
   windows:
     runs-on: ${{ matrix.platform.runner }}
@@ -182,8 +182,8 @@ jobs:
           python3 -m venv .venv
           source .venv/Scripts/activate
           pip install queson --no-index --find-links dist --force-reinstall
-          pip install pytest
-          pytest tests
+          pip install pytest pytest-mypy
+          pytest --mypy tests
 
   macos:
     runs-on: ${{ matrix.platform.runner }}
@@ -218,8 +218,8 @@ jobs:
           python3 -m venv .venv
           source .venv/bin/activate
           pip install queson --no-index --find-links dist --force-reinstall
-          pip install pytest
-          pytest tests
+          pip install pytest pytest-mypy
+          pytest --mypy tests
 
   sdist:
     runs-on: ubuntu-latest
