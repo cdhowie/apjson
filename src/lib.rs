@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
 mod de;
-#[cfg(all(feature = "pymem-alloc", not(windows)))]
+#[cfg(all(feature = "pymem-alloc", not(windows), not(test)))]
 mod pymem;
 mod ser;
 mod simd;
