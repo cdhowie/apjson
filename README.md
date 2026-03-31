@@ -1,6 +1,7 @@
 # queson
 
 [![CI](https://github.com/cdhowie/queson/actions/workflows/CI.yml/badge.svg)](https://github.com/cdhowie/queson/actions/workflows/CI.yml)
+[![PyPI - Version](https://img.shields.io/pypi/v/queson)](https://pypi.org/project/queson/)
 
 An experimental JSON encoder/decoder Python module written in Rust.
 
