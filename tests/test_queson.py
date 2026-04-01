@@ -31,6 +31,9 @@ def test_jsontestsuite() -> None:
                     if file.name.startswith('n_'):
                         raise RuntimeError(f"parsing succeeded when it shouldn't")
 
+                    # Test serialization.
+                    assert queson.loadb(queson.dumpb(result)) == result
+
                     # Only compare to json.loads() for tests that must succeed,
                     # because json.loads() is allowed to fail for other tests.
                     if file.name.startswith('y_'):
@@ -47,7 +50,12 @@ def test_benchmark_testfiles():
                 with open(file, 'rb') as f:
                     content = f.read()
 
-                assert queson.loadb(content) == json.loads(content)
+                result = queson.loadb(content)
+
+                assert result == json.loads(content)
+
+                # Test serialization.
+                assert queson.loadb(queson.dumpb(result)) == result
             except Exception as e:
                 raise RuntimeError(f"test case {file.name} failed") from e
 
