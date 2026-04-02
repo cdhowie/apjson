@@ -2,7 +2,7 @@ import pathlib
 import pyperf
 import os
 
-def run_bench(load, dump):
+def run_bench(load, dump, skip_testfiles=[]):
     runner = pyperf.Runner()
 
     runner.parse_args()
@@ -13,7 +13,7 @@ def run_bench(load, dump):
     runner.args.inherit_environ.extend(['BENCH_SKIP_LOAD', 'BENCH_SKIP_DUMP'])
 
     for entry in pathlib.Path('testfiles').iterdir():
-        if entry.is_file():
+        if entry.is_file() and entry.name not in skip_testfiles:
             with open(entry, 'rb') as f:
                 encoded = f.read()
 
