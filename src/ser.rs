@@ -130,22 +130,44 @@ impl<'py> State<'py> {
 
 /// Serialize the given value to the buffer.
 fn any_to_json<'py>(state: &mut State<'py>, value: &Bound<'py, PyAny>) -> ThunkResult<'py, PyErr> {
-    match (any_to_json_native(state, value), state.object_hook) {
-        (ThunkResult::Err(AnyToJsonNativeError::UnsupportedType(_)), Some(hook)) => {
+    // This function initially called any_to_json_native twice, once right away
+    // and once in a match that handled the UnsupportedType case.  This
+    // prevented the optimizer from inlining any_to_json_native.
+    //
+    // Restructuring this as a loop looks like it would be slower due to the
+    // added conditionals and jumps, but improves average serialization
+    // performance by around 10% in benchmarks.
+
+    // This apparent no-op shortens the lifetime of the value reference so we
+    // can rebind it in the loop to a local.
+    let mut value = value;
+    let mut owned_value;
+
+    // Copying this Option instead of using a separate bool flag to check if
+    // we've tried the hook already improves performance a bit.
+    let mut object_hook = state.object_hook;
+
+    loop {
+        let r = any_to_json_native(state, value);
+
+        if let Some(hook) = object_hook
+            && matches!(
+                r,
+                ThunkResult::Err(AnyToJsonNativeError::UnsupportedType(_))
+            )
+        {
             thunk_try!(state.push_object(value));
 
-            // If we have an object hook, we can try calling that and then
-            // serializing the result.
-            let r = any_to_json_native(state, &thunk_try!(hook.call1((value,))));
+            owned_value = thunk_try!(hook.call1((value,)));
+            value = &owned_value;
 
             state.pop_object();
 
-            r
+            object_hook = None;
+        } else {
+            break r.map_err(|e| e.into());
         }
-
-        (r, _) => r,
     }
-    .map_err(|e| e.into())
 }
 
 /// Errors that can occur in [`any_to_json_native`].
