@@ -28,6 +28,7 @@ enum ThunkContinuation<'py> {
     SerializingSequence(SequenceIterator<'py>),
     /// In-progress dict serialization.
     SerializingDict(BoundDictIterator<'py>),
+    Done,
 }
 
 /// Wrapper for Python sequence iterators (lists and tuples).
@@ -129,6 +130,7 @@ impl<'py> State<'py> {
 }
 
 /// Serialize the given value to the buffer.
+#[inline(always)]
 fn any_to_json<'py>(state: &mut State<'py>, value: &Bound<'py, PyAny>) -> ThunkResult<'py, PyErr> {
     // This function initially called any_to_json_native twice, once right away
     // and once in a match that handled the UnsupportedType case.  This
@@ -465,7 +467,7 @@ fn continue_dict_to_json<'py>(
 
 /// Serialize the given value as JSON.
 pub fn into_json<'py>(
-    value: &Bound<'py, PyAny>,
+    value: Bound<'py, PyAny>,
     object_hook: Option<&'py Bound<'py, PyFunction>>,
     check_circular: bool,
 ) -> PyResult<Vec<u8>> {
@@ -477,7 +479,10 @@ pub fn into_json<'py>(
 
     let mut stack = vec![];
 
-    let mut last_result = any_to_json(&mut state, value);
+    let mut last_result = ThunkResult::Thunk(Thunk {
+        item: value,
+        continuation: ThunkContinuation::Done,
+    });
 
     loop {
         last_result = match last_result {
@@ -498,7 +503,7 @@ pub fn into_json<'py>(
                     continue_dict_to_json(&mut state, iter)
                 }
 
-                None => break,
+                Some(ThunkContinuation::Done) | None => break,
             },
         };
     }

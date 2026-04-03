@@ -130,7 +130,7 @@ mod queson {
     #[pyfunction]
     #[pyo3(signature = (value, *, object_hook = None, check_circular = true))]
     fn dumps<'py>(
-        value: &Bound<'py, PyAny>,
+        value: Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
         check_circular: bool,
     ) -> PyResult<Bound<'py, PyString>> {
@@ -183,7 +183,7 @@ mod queson {
     #[pyfunction]
     #[pyo3(signature = (value, *, object_hook = None, check_circular = true))]
     fn dumpb<'py>(
-        value: &Bound<'py, PyAny>,
+        value: Bound<'py, PyAny>,
         object_hook: Option<&'py Bound<'py, PyFunction>>,
         check_circular: bool,
     ) -> PyResult<Bound<'py, PyBytes>> {
