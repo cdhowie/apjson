@@ -494,17 +494,35 @@ pub fn into_json<'py>(
                 any_to_json(&mut state, &op.item)
             }
 
-            ThunkResult::Ok(()) => match stack.pop() {
-                Some(ThunkContinuation::SerializingSequence(iter)) => {
-                    continue_list_to_json(&mut state, iter)
-                }
+            ThunkResult::Ok(()) => {
+                // SAFETY: The bottom of the stack is guaranteed to be
+                // ThunkContinuation::Done:
+                //
+                // * We set last_result to a thunk with the Done continuation
+                //   initially.
+                // * So the ThunkResult::Thunk arm above runs, pushing that
+                //   continuation.
+                //
+                // When we reach that continuation below, we break out of the
+                // loop.  Therefore, the stack will never be empty when we get
+                // to this line.
+                //
+                // Using unwrap_unchecked here results in ~17% faster
+                // benchmarks.
+                let continuation = unsafe { stack.pop().unwrap_unchecked() };
 
-                Some(ThunkContinuation::SerializingDict(iter)) => {
-                    continue_dict_to_json(&mut state, iter)
-                }
+                match continuation {
+                    ThunkContinuation::SerializingSequence(iter) => {
+                        continue_list_to_json(&mut state, iter)
+                    }
 
-                Some(ThunkContinuation::Done) | None => break,
-            },
+                    ThunkContinuation::SerializingDict(iter) => {
+                        continue_dict_to_json(&mut state, iter)
+                    }
+
+                    ThunkContinuation::Done => break,
+                }
+            }
         };
     }
 
