@@ -260,6 +260,10 @@ impl<'py> Deserialization for PyDeserialization<'py> {
                 s.extend(value.as_bytes());
                 s.push(0);
 
+                // SAFETY: We give PyLong_FromString a valid pointer to a
+                // nul-terminated string of ASCII digits, it will return a null
+                // pointer on failure, and Bound::from_owned_ptr_or_err will
+                // check the null case for us.
                 unsafe {
                     Ok(Bound::from_owned_ptr_or_err(
                         self.python,

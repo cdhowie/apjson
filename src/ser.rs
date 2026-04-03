@@ -250,18 +250,24 @@ fn any_to_json_native<'py>(
     ThunkResult::Ok(())
 }
 
-trait FastExtractInt {
+/// A helper trait for reducing the cost of failure when extracting ints.
+///
+/// # Safety
+///
+/// `EXTRACTOR` must be a Python FFI function that accepts a valid pointer to a
+/// Python PyLong object, and it must return `ERROR_SENTINEL` on failure.
+unsafe trait FastExtractInt {
     const ERROR_SENTINEL: Self;
     const EXTRACTOR: unsafe extern "C" fn(*mut pyo3::ffi::PyObject) -> Self;
 }
 
-impl FastExtractInt for u64 {
+unsafe impl FastExtractInt for u64 {
     const ERROR_SENTINEL: Self = !0;
     const EXTRACTOR: unsafe extern "C" fn(*mut pyo3::ffi::PyObject) -> Self =
         PyLong_AsUnsignedLongLong;
 }
 
-impl FastExtractInt for i64 {
+unsafe impl FastExtractInt for i64 {
     const ERROR_SENTINEL: Self = -1;
     const EXTRACTOR: unsafe extern "C" fn(*mut pyo3::ffi::PyObject) -> Self = PyLong_AsLongLong;
 }
@@ -272,9 +278,15 @@ impl FastExtractInt for i64 {
 /// `PyErr` is created and then discarded, as would be the case with the
 /// PyO3-based `.extract` mechanism.
 fn fast_extract_int<T: FastExtractInt + PartialEq>(v: &Bound<'_, PyInt>) -> Option<T> {
+    // SAFETY: According to the safety constraints of FastExtractInt, EXTRACTOR
+    // must accept a pointer to a Python PyLong object, which is what the PyO3
+    // type PyInt represents, and we accept a Bound<PyInt>.
     let r = unsafe { T::EXTRACTOR(v.as_ptr()) };
 
     if r == T::ERROR_SENTINEL && PyErr::occurred(v.py()) {
+        // SAFETY: The only safety requirement for this function is that of
+        // nearly every FFI function, which is that we hold the GIL.  This must
+        // be the case since we accept a Bound argument.
         unsafe { PyErr_Clear() };
         None
     } else {
