@@ -26,7 +26,7 @@ type ThunkResult<D> = crate::thunk::ThunkResult<
 /// is resumed.
 enum Thunk<D: Deserialization> {
     /// Incomplete parsing of a list.
-    ParsingList(D::List),
+    ParsingList(D::BuildingList),
 
     /// Incomplete parsing of a map.
     ParsingMap {
@@ -134,6 +134,8 @@ trait Deserialization {
     type Number: Into<Self::Any>;
     /// The map type.
     type Map: Into<Self::Any>;
+    /// The type of a list being built.
+    type BuildingList;
     /// The list type.
     type List: Into<Self::Any>;
 
@@ -178,14 +180,13 @@ trait Deserialization {
     fn finish_map(&self, map: Self::Map) -> Result<Self::Any, ParseError<Self::Error>>;
 
     /// Create an empty list.
-    fn create_list(&self) -> Self::List;
+    fn create_list(&self) -> Self::BuildingList;
 
     /// Extend the given list with the provided value.
-    fn extend_list(
-        &self,
-        list: &mut Self::List,
-        value: Self::Any,
-    ) -> Result<(), ParseError<Self::Error>>;
+    fn extend_list(&self, list: &mut Self::BuildingList, value: Self::Any);
+
+    /// Finish building a list.
+    fn finish_list(&self, list: Self::BuildingList) -> Result<Self::List, ParseError<Self::Error>>;
 }
 
 /// Wrapper type for any Python value.
@@ -216,6 +217,7 @@ impl<'py> Deserialization for PyDeserialization<'py> {
     // Can be float or int, so must be any.
     type Number = BoundAny<'py>;
     type Map = Bound<'py, PyDict>;
+    type BuildingList = Vec<BoundAny<'py>>;
     type List = Bound<'py, PyList>;
 
     type Error = PyErr;
@@ -308,16 +310,16 @@ impl<'py> Deserialization for PyDeserialization<'py> {
         }
     }
 
-    fn create_list(&self) -> Self::List {
-        PyList::empty(self.python)
+    fn create_list(&self) -> Self::BuildingList {
+        vec![]
     }
 
-    fn extend_list(
-        &self,
-        list: &mut Self::List,
-        value: Self::Any,
-    ) -> Result<(), ParseError<Self::Error>> {
-        Ok(list.append(value.0)?)
+    fn extend_list(&self, list: &mut Self::BuildingList, value: Self::Any) {
+        list.push(value);
+    }
+
+    fn finish_list(&self, list: Self::BuildingList) -> Result<Self::List, ParseError<Self::Error>> {
+        Ok(PyList::new(self.python, list.into_iter().map(|a| a.0))?)
     }
 }
 
@@ -334,6 +336,7 @@ impl Deserialization for ValidateDeserialization {
     type String = ();
     type Number = ();
     type Map = ();
+    type BuildingList = ();
     type List = ();
 
     type Error = Infallible;
@@ -382,11 +385,12 @@ impl Deserialization for ValidateDeserialization {
 
     fn create_list(&self) -> Self::List {}
 
-    fn extend_list(
+    fn extend_list(&self, _list: &mut Self::BuildingList, _value: Self::Any) {}
+
+    fn finish_list(
         &self,
-        _list: &mut Self::List,
-        _value: Self::Any,
-    ) -> Result<(), ParseError<Self::Error>> {
+        _list: Self::BuildingList,
+    ) -> Result<Self::List, ParseError<Self::Error>> {
         Ok(())
     }
 }
@@ -772,7 +776,7 @@ fn parse_list<D: Deserialization>(deserialization: &D, b: &mut &[u8]) -> ThunkRe
 
     if thunk_try!(b.peek()) == b']' {
         b.skip();
-        return ThunkResult::<D>::Ok(list.into());
+        return ThunkResult::<D>::Ok(thunk_try!(deserialization.finish_list(list)).into());
     }
 
     ThunkResult::Thunk(Thunk::ParsingList(list))
@@ -784,16 +788,16 @@ fn parse_list<D: Deserialization>(deserialization: &D, b: &mut &[u8]) -> ThunkRe
 /// the list itself is being resumed from a thunk.
 fn continue_parse_list<D: Deserialization>(
     deserialization: &D,
-    mut list: D::List,
+    mut list: D::BuildingList,
     value: D::Any,
     b: &mut &[u8],
 ) -> ThunkResult<D> {
-    thunk_try!(deserialization.extend_list(&mut list, value));
+    deserialization.extend_list(&mut list, value);
 
     b.consume_whitespace();
 
     match thunk_try!(b.read()) {
-        b']' => ThunkResult::Ok(list.into()),
+        b']' => ThunkResult::Ok(thunk_try!(deserialization.finish_list(list)).into()),
 
         b',' => {
             b.consume_whitespace();
