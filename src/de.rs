@@ -425,13 +425,21 @@ trait Cursor {
     fn skip_n(&mut self, n: usize);
 
     /// Reads the next byte, returning an EOF error if there is none.
-    fn read<T>(&mut self) -> Result<u8, ParseError<T>>;
+    fn read<T>(&mut self) -> Result<u8, ParseError<T>> {
+        let v = self.peek()?;
+        self.skip();
+        Ok(v)
+    }
 
     /// Consumes all characters considered whitespace by the JSON specification.
     ///
     /// After calling this method, the byte slice must be either empty, or the
     /// first character must not be whitespace.
-    fn consume_whitespace(&mut self);
+    fn consume_whitespace(&mut self) {
+        while matches!(self.peek::<()>(), Ok(b' ' | b'\n' | b'\r' | b'\t')) {
+            self.skip();
+        }
+    }
 }
 
 impl Cursor for &[u8] {
@@ -441,23 +449,6 @@ impl Cursor for &[u8] {
 
     fn skip_n(&mut self, n: usize) {
         *self = &self[n..];
-    }
-
-    fn read<T>(&mut self) -> Result<u8, ParseError<T>> {
-        let v = self.peek()?;
-        self.skip();
-        Ok(v)
-    }
-
-    fn consume_whitespace(&mut self) {
-        for i in 0..self.len() {
-            if !matches!(self[i], b' ' | b'\n' | b'\r' | b'\t') {
-                *self = &self[i..];
-                return;
-            }
-        }
-
-        *self = &[];
     }
 }
 
