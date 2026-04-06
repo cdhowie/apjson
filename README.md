@@ -35,19 +35,22 @@ Benchmark environment:
 * Python 3.11.11
     * orjson 3.9.5
 
-| Benchmark               | json    | queson                | orjson                 |
-| :---------------------- | ------: | --------------------: | ---------------------: |
-| jsonmsg-1.json load     | 177 us  | 86.7 us: 2.04x faster | 52.8 us: 3.34x faster  |
-| jsonmsg-1.json dump     | 213 us  | 67.2 us: 3.16x faster | 21.1 us: 10.07x faster |
-| jsonmsg-23.json load    | 2.29 ms | 1.53 ms: 1.50x faster | 785 us: 2.92x faster   |
-| jsonmsg-23.json dump    | 2.66 ms | 575 us: 4.61x faster  | 236 us: 11.26x faster  |
-| jsonmsg-5.json load     | 897 us  | 879 us: 1.02x faster  | 522 us: 1.72x faster   |
-| jsonmsg-5.json dump     | 1.24 ms | 395 us: 3.13x faster  | 225 us: 5.51x faster   |
-| jsonmsg-7.json load     | 664 us  | 523 us: 1.27x faster  | 295 us: 2.25x faster   |
-| jsonmsg-7.json dump     | 865 us  | 180 us: 4.81x faster  | 73.7 us: 11.73x faster |
-| oops-all-ints.json load | 168 us  | 80.5 us: 2.09x faster | 45.6 us: 3.69x faster  |
-| oops-all-ints.json dump | 203 us  | 65.2 us: 3.11x faster | 20.1 us: 10.10x faster |
-| Geometric mean          | (ref)   | 2.37x faster          | 5.03x faster           |
+| Benchmark                | json    | queson                | orjson                 |
+|--------------------------|--------:|----------------------:|-----------------------:|
+| jsonmsg-1.json load      | 176 us  | 81.8 us: 2.15x faster | 52.1 us: 3.37x faster  |
+| jsonmsg-1.json dump      | 208 us  | 33.7 us: 6.19x faster | 20.7 us: 10.05x faster |
+| jsonmsg-23.json load     | 2.29 ms | 1.52 ms: 1.51x faster | 765 us: 3.00x faster   |
+| jsonmsg-23.json dump     | 2.67 ms | 434 us: 6.16x faster  | 232 us: 11.51x faster  |
+| jsonmsg-5.json load      | 880 us  | 813 us: 1.08x faster  | 509 us: 1.73x faster   |
+| jsonmsg-5.json dump      | 1.24 ms | 290 us: 4.28x faster  | 220 us: 5.65x faster   |
+| jsonmsg-7.json load      | 659 us  | 507 us: 1.30x faster  | 292 us: 2.26x faster   |
+| jsonmsg-7.json dump      | 854 us  | 142 us: 6.03x faster  | 71.8 us: 11.90x faster |
+| oops-all-ints.json load  | 172 us  | 66.4 us: 2.60x faster | 39.6 us: 4.36x faster  |
+| oops-all-ints.json dump  | 200 us  | 33.1 us: 6.06x faster | 21.3 us: 9.42x faster  |
+| oops-all-uints.json load | 169 us  | 73.5 us: 2.29x faster | 44.0 us: 3.83x faster  |
+| oops-all-uints.json dump | 202 us  | 31.8 us: 6.36x faster | 19.9 us: 10.19x faster |
+| Geometric mean           | (ref)   | 3.17x faster          | 5.30x faster           |
+
 
 Running the same benchmarks but monitoring memory usage concludes that `queson`
 has a 2% higher RSS peak than `json`, and `orjson` has a 13% higher RSS peak

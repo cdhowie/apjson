@@ -1,3 +1,7 @@
+# 0.2.3
+
+* Optimizations.
+
 # 0.2.2
 
 * Fixed `depth_limit` argument missing in type stubs.
