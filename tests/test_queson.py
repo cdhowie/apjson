@@ -49,7 +49,7 @@ def test_jsontestsuite_streaming() -> None:
         if file.is_file():
             try:
                 try:
-                    with open(file, 'r') as f:
+                    with open(file, 'r', encoding='utf8') as f:
                         result = queson.load(f)
                     err = None
                 except ValueError as e:
@@ -72,7 +72,7 @@ def test_jsontestsuite_streaming() -> None:
                     # Only compare to json.loads() for tests that must succeed,
                     # because json.loads() is allowed to fail for other tests.
                     if file.name.startswith('y_'):
-                        with open(file, 'r') as f:
+                        with open(file, 'r', encoding='utf8') as f:
                             assert json.load(f) == result
             except Exception as e:
                 raise RuntimeError(f"test case {file.name} failed") from e
