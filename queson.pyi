@@ -1,4 +1,11 @@
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union, IO, TextIO
+
+def load(
+    file: IO,
+    *,
+    object_hook: Optional[Callable[[dict[str, Any]], Any]] = None,
+    depth_limit: Optional[int] = None,
+) -> Any: ...
 
 def loadb(
     json: Union[bytes, str],
@@ -13,6 +20,14 @@ def loads(
     object_hook: Optional[Callable[[dict[str, Any]], Any]] = None,
     depth_limit: Optional[int] = None,
 ) -> Any: ...
+
+def dump(
+    value: Any,
+    file: TextIO,
+    *,
+    object_hook: Optional[Callable[[Any], Any]] = None,
+    check_circular: bool = True,
+) -> None: ...
 
 def dumpb(
     value: Any,

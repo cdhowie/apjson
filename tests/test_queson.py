@@ -1,6 +1,7 @@
 import pytest
 
 import queson
+import io
 import json
 import math
 import typing
@@ -38,6 +39,41 @@ def test_jsontestsuite() -> None:
                     # because json.loads() is allowed to fail for other tests.
                     if file.name.startswith('y_'):
                         assert json.loads(content) == result
+            except Exception as e:
+                raise RuntimeError(f"test case {file.name} failed") from e
+
+def test_jsontestsuite_streaming() -> None:
+    testsdir = Path(__file__).resolve().parent.parent / 'external/JSONTestSuite/test_parsing'
+
+    for file in testsdir.iterdir():
+        if file.is_file():
+            try:
+                try:
+                    with open(file, 'r') as f:
+                        result = queson.load(f)
+                    err = None
+                except ValueError as e:
+                    err = e
+                except Exception as e:
+                    raise RuntimeError('raised exception was not a ValueError') from e
+
+                if err is not None and file.name.startswith('y_'):
+                    raise RuntimeError(f"parsing failed") from err
+
+                if err is None:
+                    if file.name.startswith('n_'):
+                        raise RuntimeError(f"parsing succeeded when it shouldn't")
+
+                    # Test serialization.
+                    ser = io.StringIO()
+                    queson.dump(result, ser)
+                    assert queson.loads(ser.getvalue()) == result
+
+                    # Only compare to json.loads() for tests that must succeed,
+                    # because json.loads() is allowed to fail for other tests.
+                    if file.name.startswith('y_'):
+                        with open(file, 'r') as f:
+                            assert json.load(f) == result
             except Exception as e:
                 raise RuntimeError(f"test case {file.name} failed") from e
 

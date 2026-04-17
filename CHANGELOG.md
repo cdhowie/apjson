@@ -1,3 +1,7 @@
+# Unreleased
+
+* Add `dump` and `load` shims.
+
 # 0.2.3
 
 * Optimizations.
