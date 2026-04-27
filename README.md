@@ -60,15 +60,16 @@ than `json`.
 
 This list may not be exhaustive.
 
-* There is currently no streaming support (`load` and `dump` are absent).  This
-  may be added in the future.
+* There is currently no proper streaming support (`load` and `dump` are shims
+  that buffer the entire input and output in memory).  This may be changed in
+  the future.
 * Non-finite float values (`NaN`, `Infinity`, `-Infinity`) are rejected during
   encoding and decoding as they are not valid JSON.
-* `dumpb`/`dumps` does not support `float` `dict` keys.  The JSON specification
-  does not guarantee a particular method of formatting float values, nor does it
+* Dumping does not support `float` `dict` keys.  The JSON specification does not
+  guarantee a particular method of formatting float values, nor does it
   guarantee any specific level of precision.  The lack of a canonical float
   representation means `float` keys are of dubious value.
-* `loads` does not support `bytearray` objects.  This is because they are
+* Loading does not support `bytearray` objects.  This is because they are
   mutable, and object hook support would allow Python code to mutate the
   contents while the decoder is running.  As this can invalidate the data
   pointer, it would be necessary to re-obtain the data pointer after every
